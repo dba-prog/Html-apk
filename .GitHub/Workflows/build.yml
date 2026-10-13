@@ -1,0 +1,196 @@
+name: Build APK
+
+# Wraps the web app in this repo (an .html file plus any files next to it) in an
+# Android WebView app, then publishes the debug APK under Releases > "Latest APK".
+# App name = the page <title>. App id = com.personal.<title in lowercase letters>.
+
+on:
+  push:
+    branches: ["**"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: android-actions/setup-android@v3
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.7"
+
+      # Keeps the same debug signing key between builds so a new APK installs over the old one
+      - uses: actions/cache@v4
+        with:
+          path: ~/.android/debug.keystore
+          key: debug-keystore-v1
+
+      - name: Create the debug key if it is missing
+        run: |
+          mkdir -p ~/.android
+          [ -f ~/.android/debug.keystore ] || keytool -genkeypair -keystore ~/.android/debug.keystore -storepass android -keypass android -alias androiddebugkey -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
+
+      - name: Wrap the web app in an Android project
+        run: |
+          set -e
+          mkdir -p /tmp/www
+          cp -r ./* /tmp/www/
+          if [ ! -f /tmp/www/index.html ]; then
+            F=$(ls /tmp/www/*.html 2>/dev/null | head -n1)
+            [ -n "$F" ] || { echo "No .html file found in the repo root"; exit 1; }
+            mv "$F" /tmp/www/index.html
+          fi
+          TITLE=$(sed -n 's:.*<title>\(.*\)</title>.*:\1:Ip' /tmp/www/index.html | head -n1 | tr -cd '[:alnum:] ._-')
+          [ -n "$TITLE" ] || TITLE="My App"
+          ID=$(echo "$TITLE" | tr -cd '[:alnum:]' | tr 'A-Z' 'a-z')
+          case "$ID" in ""|[0-9]*) ID="app$ID";; esac
+          echo "APP_NAME=$TITLE" >> "$GITHUB_ENV"
+          echo "APP_ID=com.personal.$ID" >> "$GITHUB_ENV"
+          mkdir -p src/main/assets src/main/java/com/personal/webapp src/main/res/drawable
+          mv /tmp/www src/main/assets/www
+
+          cat > settings.gradle <<'EOF'
+          pluginManagement {
+              repositories { google(); mavenCentral(); gradlePluginPortal() }
+              plugins { id 'com.android.application' version '8.5.2' }
+          }
+          dependencyResolutionManagement {
+              repositories { google(); mavenCentral() }
+          }
+          rootProject.name = 'WebApp'
+          EOF
+
+          cat > build.gradle <<'EOF'
+          plugins { id 'com.android.application' }
+
+          def idValue = (project.findProperty('appId') ?: 'com.personal.webapp').toString()
+          def nameValue = (project.findProperty('appName') ?: 'My App').toString()
+
+          android {
+              namespace 'com.personal.webapp'
+              compileSdk 34
+              buildFeatures { resValues true }
+              defaultConfig {
+                  applicationId idValue
+                  minSdk 24
+                  targetSdk 34
+                  versionCode 1
+                  versionName '1.0'
+                  resValue 'string', 'app_name', nameValue
+              }
+              compileOptions {
+                  sourceCompatibility JavaVersion.VERSION_17
+                  targetCompatibility JavaVersion.VERSION_17
+              }
+          }
+          EOF
+
+          cat > src/main/AndroidManifest.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+              <uses-permission android:name="android.permission.VIBRATE" />
+              <application
+                  android:label="@string/app_name"
+                  android:icon="@drawable/ic_launcher"
+                  android:theme="@android:style/Theme.DeviceDefault.NoActionBar">
+                  <activity
+                      android:name=".MainActivity"
+                      android:exported="true"
+                      android:windowSoftInputMode="adjustResize"
+                      android:configChanges="orientation|screenSize|keyboardHidden|screenLayout|smallestScreenSize|uiMode">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+                  </activity>
+              </application>
+          </manifest>
+          EOF
+
+          cat > src/main/java/com/personal/webapp/MainActivity.java <<'EOF'
+          package com.personal.webapp;
+
+          import android.app.Activity;
+          import android.os.Bundle;
+          import android.view.View;
+          import android.view.WindowManager;
+          import android.webkit.WebChromeClient;
+          import android.webkit.WebSettings;
+          import android.webkit.WebView;
+          import android.webkit.WebViewClient;
+
+          public class MainActivity extends Activity {
+              private WebView web;
+
+              @Override
+              protected void onCreate(Bundle state) {
+                  super.onCreate(state);
+                  getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+                  web = new WebView(this);
+                  web.setBackgroundColor(0xFF000000);
+                  setContentView(web);
+                  WebSettings s = web.getSettings();
+                  s.setJavaScriptEnabled(true);
+                  s.setDomStorageEnabled(true);
+                  s.setMediaPlaybackRequiresUserGesture(false);
+                  web.setWebViewClient(new WebViewClient());
+                  web.setWebChromeClient(new WebChromeClient());
+                  web.loadUrl("file:///android_asset/www/index.html");
+              }
+
+              @Override
+              public void onWindowFocusChanged(boolean hasFocus) {
+                  super.onWindowFocusChanged(hasFocus);
+                  if (hasFocus) {
+                      getWindow().getDecorView().setSystemUiVisibility(
+                          View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                          | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                          | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                          | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                          | View.SYSTEM_UI_FLAG_FULLSCREEN
+                          | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY);
+                  }
+              }
+
+              @Override
+              public void onBackPressed() {
+                  if (web.canGoBack()) web.goBack();
+                  else super.onBackPressed();
+              }
+          }
+          EOF
+
+          cat > src/main/res/drawable/ic_launcher.xml <<'EOF'
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="108dp" android:height="108dp"
+              android:viewportWidth="108" android:viewportHeight="108">
+              <path android:fillColor="#2A2563" android:pathData="M0,0h108v108h-108z" />
+              <path android:fillColor="#FFC93C" android:pathData="M40,30L82,54L40,78Z" />
+          </vector>
+          EOF
+
+      - name: Build the APK
+        run: gradle assembleDebug --no-daemon -PappName="$APP_NAME" -PappId="$APP_ID"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: apk
+          path: build/outputs/apk/debug/*.apk
+
+      - name: Publish as the "Latest APK" release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh release delete latest --yes --cleanup-tag || true
+          gh release create latest build/outputs/apk/debug/*.apk --title "Latest APK" --notes "Built from commit ${{ github.sha }}"
