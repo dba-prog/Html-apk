@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Number Racer</title>
+<style>
+:root{--bg:#120f33;--card:#2a2563;--gold:#ffc93c;--mint:#3ddc97;--coral:#ff5d73;--ink:#14102e}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+html,body{height:100%;overscroll-behavior:none}
+body{background:var(--bg);color:#fff;font-family:ui-rounded,"Trebuchet MS",system-ui,sans-serif;overflow:hidden}
+button{font:inherit;color:inherit;border:0;cursor:pointer;touch-action:manipulation}
+
+/* home */
+#home{display:none;height:100%;overflow:auto;padding:28px 16px 32px;max-width:520px;margin:0 auto}
+.home #home{display:block}
+#home h1{font-size:2rem;color:var(--gold)}
+#home p{opacity:.8;margin:6px 0 18px}
+.lbl{margin:14px 0 8px;font-weight:700;opacity:.85}
+.chips{display:flex;gap:10px}
+.chip{flex:1;padding:12px;border-radius:12px;background:var(--card);border:2px solid transparent;font-weight:800}
+.chip.on{border-color:var(--gold);color:var(--gold)}
+.go{display:block;width:100%;margin-top:14px;padding:18px;border-radius:18px;font-size:1.2rem;font-weight:800;color:var(--ink)}
+.go.a{margin-top:24px;background:var(--mint)}
+.go.b{background:var(--gold)}
+
+/* game */
+#game{display:none;flex-direction:column;height:100vh;height:100dvh}
+.play #game{display:flex}
+#hud{flex:none;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 12px;font-weight:800}
+#hud button{background:#ffffff22;border-radius:10px;padding:6px 12px}
+#view{position:relative;flex:1;min-height:120px}
+#cv{position:absolute;inset:0;width:100%;height:100%}
+#ban{position:absolute;top:8px;left:50%;translate:-50% 0;min-width:130px;padding:4px 20px 6px;border-radius:16px;background:#0008;border:2px solid var(--gold);text-align:center;pointer-events:none}
+#ban small{display:block;font-size:.7rem;letter-spacing:.1em;opacity:.8}
+#ban b{font-size:2.2rem;color:var(--gold);line-height:1}
+#sp{position:absolute;left:10px;bottom:8px;font-weight:800;text-shadow:0 1px 3px #000}
+#hint{position:absolute;left:0;right:0;top:55%;text-align:center;font-weight:800;font-size:1.2rem;text-shadow:0 1px 4px #000;pointer-events:none}
+
+/* driving controls */
+#ctl{flex:none;display:grid;grid-template-columns:1fr 1fr 1.2fr 1.2fr;gap:10px;padding:10px 10px calc(12px + env(safe-area-inset-bottom))}
+#ctl button{height:84px;border-radius:18px;font-weight:900;box-shadow:0 5px 0 #0006;touch-action:none}
+#ctl button.down{transform:translateY(4px);box-shadow:0 1px 0 #0006}
+#lf,#rt{background:#4a43a8;font-size:2rem}
+#brk{background:var(--coral);color:var(--ink);font-size:1.05rem;margin-left:8px}
+#gas{background:var(--mint);color:var(--ink);font-size:1.15rem}
+
+/* result popup */
+#res{position:fixed;inset:0;display:none;align-items:center;justify-content:center;padding:20px;background:#000a;z-index:9}
+#res.show{display:flex}
+#res div{width:min(100%,340px);padding:26px 20px;border-radius:22px;background:var(--card);text-align:center;display:flex;flex-direction:column;gap:12px;animation:pop .3s}
+#res h2{font-size:1.7rem}
+.btn{padding:15px;border-radius:14px;font-weight:800;font-size:1.1rem;color:var(--ink)}
+.again{background:#ff9f1c}
+.mint{background:var(--mint)}
+@keyframes pop{from{transform:scale(.85);opacity:0}}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body class="home">
+
+<main id="home">
+  <h1>Number Racer 🚗</h1>
+  <p>Drive with GAS and BRAKE, switch lanes with ◀ ▶. Collect the numbers in order. Wrong numbers and letters cost points. Dodge cars and rocks!</p>
+  <div class="lbl">Lanes</div><div class="chips" id="cl"></div>
+  <div class="lbl">Timed race length</div><div class="chips" id="ct"></div>
+  <button class="go a" onclick="startGame('timed')">⏱ Timed race</button>
+  <button class="go b" onclick="startGame('endless')">♾️ Endless drive</button>
+</main>
+
+<section id="game">
+  <div id="hud">
+    <button onclick="menu()">←</button>
+    <span>Score <span id="sc">0</span></span>
+    <span id="tleft">∞</span>
+    <button id="snd" onclick="toggleSound()">🔊</button>
+  </div>
+  <div id="view">
+    <canvas id="cv"></canvas>
+    <div id="ban"><small>NEXT NUMBER</small><b id="nxt">1</b></div>
+    <div id="sp">0 km/h</div>
+    <div id="hint">Hold GAS to drive</div>
+  </div>
+  <div id="ctl">
+    <button id="lf">◀</button>
+    <button id="rt">▶</button>
+    <button id="brk">BRAKE</button>
+    <button id="gas">GAS</button>
+  </div>
+</section>
+
+<div id="res"><div>
+  <h2 id="rt2"></h2>
+  <p id="rx"></p>
+  <button class="btn again" onclick="startGame(mode)">🔄 Play again</button>
+  <button class="btn mint" onclick="menu()">🏠 Menu</button>
+</div></div>
+
+<script>
+const $ = id => document.getElementById(id);
+const rnd = (a, b) => Math.floor(Math.random() * (b - a + 1)) + a;
+const pick = a => a[rnd(0, a.length - 1)];
+const vibrate = ms => { if (navigator.vibrate) navigator.vibrate(ms); };
+const LET = [..."ABCDEFGHJKLMNPRSTUVWXYZ"];
+const COL = ["#4cc9f0", "#ffc93c", "#b57bff", "#3ddc97", "#ff9f1c", "#f5f5f5"];
+const fmt = s => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
+
+// ===== sound (built-in Web Audio, works offline) =====
+let ac, muted = false;
+function beep(f, d = 0.12, type = "sine", at = 0) {
+  if (muted) return;
+  try {
+    ac = ac || new (window.AudioContext || window.webkitAudioContext)();
+    if (ac.state === "suspended") ac.resume();
+    const o = ac.createOscillator(), g = ac.createGain(), s = ac.currentTime + at;
+    o.type = type; o.frequency.value = f;
+    g.gain.setValueAtTime(0.15, s);
+    g.gain.exponentialRampToValueAtTime(0.0001, s + d);
+    o.connect(g); g.connect(ac.destination);
+    o.start(s); o.stop(s + d);
+  } catch (e) {}
+}
+const ok = n => beep(420 + Math.min(n, 12) * 40, 0.09), bad = () => beep(170, 0.22, "sawtooth"), thud = () => beep(90, 0.3, "square");
+const win = () => [523, 659, 784, 1047].forEach((f, i) => beep(f, 0.22, "triangle", i * 0.12));
+function toggleSound() { muted = !muted; $("snd").textContent = muted ? "🔇" : "🔊"; }
+
+// ===== state =====
+const cv = $("cv"), ctx = cv.getContext("2d");
+const K = 30, LW = 3, VMAX = 62;          // K = depth scale, LW = lane width (m), VMAX = top speed (m/s)
+let mode = "endless", lanes = 3, mins = 3;
+let st = "home", gen = 0, raf = 0, last = 0, endT = 0;
+let W = 1, H = 1, dpr = 1, hz = 0, curve = 0;
+let dist = 0, v = 0, lanePos = 1, target = 1, score = 0, expected = 1, streak = 0, left = 0, time = 0;
+let objs = [], nextSpawn = 0, inv = 0, shake = 0, flash = 0;
+const held = { gas: false, brake: false };
+
+function resize() {
+  dpr = Math.min(2, window.devicePixelRatio || 1);
+  W = cv.width = Math.round(cv.clientWidth * dpr);
+  H = cv.height = Math.round(cv.clientHeight * dpr);
+}
+window.onresize = () => { if (st !== "home") resize(); };
+
+// ===== home settings =====
+function setLanes(n) { lanes = n; chips(); }
+function setMins(n) { mins = n; chips(); }
+function chips() {
+  const row = (vals, cur, fn, suffix) => vals.map(x =>
+    `<button class="chip${x === cur ? " on" : ""}" onclick="${fn}(${x})">${x}${suffix}</button>`).join("");
+  $("cl").innerHTML = row([3, 4, 5], lanes, "setLanes", " lanes");
+  $("ct").innerHTML = row([3, 4, 5], mins, "setMins", " min");
+}
+chips();
+
+// ===== road geometry: p = 0 at the horizon, 1 at the bottom =====
+const halfW = p => W * (0.02 + 0.47 * p);
+const cx = p => W / 2 + curve * (1 - p) * (1 - p) * W * 0.4;
+const laneX = (p, l) => cx(p) + ((l + 0.5) / lanes * 2 - 1) * halfW(p);
+const mOf = p => 2 * halfW(p) / (lanes * LW);          // pixels per meter at depth p
+
+function car(x, y, m, col) {   // rear view; x,y = bottom center
+  ctx.fillStyle = "#111";
+  ctx.fillRect(x - m, y - 0.5 * m, 0.4 * m, 0.5 * m);
+  ctx.fillRect(x + 0.6 * m, y - 0.5 * m, 0.4 * m, 0.5 * m);
+  ctx.fillStyle = col;
+  ctx.fillRect(x - 0.95 * m, y - 1.1 * m, 1.9 * m, 0.8 * m);
+  ctx.fillRect(x - 0.65 * m, y - 1.6 * m, 1.3 * m, 0.6 * m);
+  ctx.fillStyle = "#bfe8ff";
+  ctx.fillRect(x - 0.5 * m, y - 1.5 * m, m, 0.4 * m);
+  ctx.fillStyle = "#ff2d2d";
+  ctx.fillRect(x - 0.85 * m, y - 0.95 * m, 0.4 * m, 0.22 * m);
+  ctx.fillRect(x + 0.45 * m, y - 0.95 * m, 0.4 * m, 0.22 * m);
+}
+
+function rock(x, y, w, h) {
+  ctx.fillStyle = "#6f7482";
+  ctx.beginPath();
+  ctx.moveTo(x - w / 2, y); ctx.lineTo(x - w * 0.45, y - h * 0.55); ctx.lineTo(x - w * 0.15, y - h * 0.95);
+  ctx.lineTo(x + w * 0.2, y - h); ctx.lineTo(x + w * 0.48, y - h * 0.6); ctx.lineTo(x + w / 2, y);
+  ctx.fill();
+  ctx.fillStyle = "#979cab";
+  ctx.beginPath();
+  ctx.moveTo(x - w * 0.15, y - h * 0.95); ctx.lineTo(x + w * 0.2, y - h);
+  ctx.lineTo(x + w * 0.48, y - h * 0.6); ctx.lineTo(x + w * 0.05, y - h * 0.5);
+  ctx.fill();
+}
+
+function token(x, y, m, txt) {
+  const r = 1.05 * m, cy = y - r - 0.2 * m;
+  ctx.fillStyle = "#ffc93c";
+  ctx.beginPath(); ctx.arc(x, cy, r, 0, 6.283); ctx.fill();
+  ctx.lineWidth = Math.max(1, 0.14 * m);
+  ctx.strokeStyle = "#14102e"; ctx.stroke();
+  ctx.fillStyle = "#14102e";
+  ctx.font = `bold ${Math.round(1.3 * m)}px sans-serif`;
+  ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.fillText(txt, x, cy + 0.05 * m);
+}
+
+function tree(x, y, m, n) {
+  ctx.fillStyle = "#6b4a2b";
+  ctx.fillRect(x - 0.25 * m, y - 1.2 * m, 0.5 * m, 1.2 * m);
+  ctx.fillStyle = n % 3 ? "#1f9d55" : "#2bb673";
+  ctx.beginPath();
+  ctx.moveTo(x, y - 4.6 * m); ctx.lineTo(x - 1.4 * m, y - m); ctx.lineTo(x + 1.4 * m, y - m);
+  ctx.fill();
+}
+
+function draw() {
+  hz = H * 0.4;
+  const cam = dist - K / 0.97;       // camera sits just behind the player's car
+  curve = Math.sin(cam / 260) * 0.8 + Math.sin(cam / 83 + 1) * 0.25;
+
+  ctx.save();
+  if (shake > 0) ctx.translate((Math.random() - 0.5) * 12 * dpr, (Math.random() - 0.5) * 12 * dpr);
+
+  const g = ctx.createLinearGradient(0, 0, 0, hz);
+  g.addColorStop(0, "#2f7fe0"); g.addColorStop(1, "#bfe8ff");
+  ctx.fillStyle = g;
+  ctx.fillRect(-20, -20, W + 40, hz + 21);
+
+  // ground strips, striped by distance so the road moves
+  const step = Math.ceil(dpr * 1.5);
+  for (let y = Math.ceil(hz); y < H + 20; y += step) {
+    const p = (y + step / 2 - hz) / (H - hz);
+    const s = Math.floor((cam + K / p) / 12) & 1;
+    const hw = halfW(p), c = cx(p);
+    ctx.fillStyle = s ? "#2e9e4d" : "#278f43"; ctx.fillRect(-20, y, W + 40, step);
+    ctx.fillStyle = s ? "#fff" : "#d6334a"; ctx.fillRect(c - hw * 1.08, y, hw * 2.16, step);
+    ctx.fillStyle = s ? "#4b505e" : "#434856"; ctx.fillRect(c - hw, y, hw * 2, step);
+    if (s) {
+      ctx.fillStyle = "#fff";
+      for (let k = 1; k < lanes; k++) ctx.fillRect(c + (k / lanes * 2 - 1) * hw - hw * 0.012, y, hw * 0.024, step);
+    }
+  }
+
+  // roadside trees
+  const n0 = Math.floor(cam / 45);
+  for (let i = 16; i >= 1; i--) {
+    const n = n0 + i, p = K / (n * 45 - cam);
+    if (p > 1.3 || p < 0.02) continue;
+    const hw = halfW(p), m = 2 * hw / (lanes * LW);
+    tree(cx(p) + (n % 2 ? -1 : 1) * (hw * 1.2 + 2 * m), hz + p * (H - hz), m, n);
+  }
+
+  // cars, rocks and number tokens, far to near
+  objs.map(o => ({ o, z: o.z - cam })).filter(e => e.z > 24 && K / e.z > 0.06)
+    .sort((a, b) => b.z - a.z).forEach(({ o, z }) => {
+      const p = K / z, y = hz + p * (H - hz), m = mOf(p);
+      if (o.t === "c") car(laneX(p, o.lane), y, m, o.col);
+      else if (o.t === "n") token(laneX(p, o.lane), y, m, o.val);
+      else rock(laneX(p, o.lane + (o.w - 1) / 2), y, o.w * LW * m * 0.85, LW * m * 0.75);
+    });
+
+  // player car (flickers right after a crash)
+  const bob = Math.sin(time * 30) * Math.min(v, 40) * 0.03 * dpr;
+  if (inv <= 0 || Math.floor(inv * 12) % 2) car(laneX(0.97, lanePos), hz + 0.97 * (H - hz) + bob, mOf(0.97), "#ff5d73");
+  ctx.restore();
+
+  if (flash > 0) { ctx.fillStyle = `rgba(255,60,80,${flash * 0.6})`; ctx.fillRect(0, 0, W, H); }
+}
+
+// ===== spawning =====
+function numDecoy() {
+  let d;
+  do { d = rnd(1, expected + 5); } while (d === expected);
+  return String(d);
+}
+
+function spawn() {
+  const z = nextSpawn, r = rnd(0, 99), lane = rnd(0, lanes - 1);
+  nextSpawn += rnd(16, 30);
+  const has = objs.some(o => o.t === "n" && o.val === String(expected));
+  if (!has && r < 60) objs.push({ t: "n", lane, z, val: String(expected) });         // the number you need
+  else if (r < 40) objs.push({ t: "n", lane, z, val: Math.random() < 0.6 ? numDecoy() : pick(LET) });   // wrong number / letter
+  else if (r < 75) objs.push({ t: "c", lane, z, v: rnd(10, 22), col: pick(COL) });    // traffic
+  else if (r < 88) { const w = rnd(1, Math.min(2, lanes - 1)); objs.push({ t: "r", lane: rnd(0, lanes - w), z, w }); }   // rock
+}
+
+// ===== game logic =====
+function pickup(o) {
+  o.hit = true;
+  if (o.val === String(expected)) { expected++; streak++; score += 10; ok(streak); }
+  else { score = Math.max(0, score - 5); streak = 0; flash = 0.5; bad(); vibrate(150); }
+}
+
+function crash(o) {
+  o.hit = true; inv = 1.2; shake = 0.4; streak = 0;
+  v = o.t === "r" ? 0 : Math.min(v, o.v * 0.7);
+  thud(); vibrate(300);
+}
+
+function update(dt) {
+  if (st !== "play") return;
+  time += dt;
+  const a = held.brake ? -40 : held.gas ? 16 : -4;
+  v = Math.max(0, Math.min(VMAX, v + a * dt));
+  dist += v * dt;
+  lanePos += (target - lanePos) * Math.min(1, dt * 12);
+  inv = Math.max(0, inv - dt); shake = Math.max(0, shake - dt); flash = Math.max(0, flash - dt * 2);
+
+  if (mode === "timed") { left -= dt; if (left <= 0) { end(); return; } }
+  while (nextSpawn < dist + 330) spawn();
+
+  objs.forEach(o => {
+    if (o.t === "c") o.z += o.v * dt;
+    const rel = o.z - dist;
+    if (o.hit || rel > 3 || rel < -3) return;
+    if (o.t === "n") {
+      if (Math.abs(o.lane - lanePos) < 0.55) pickup(o);
+    } else if (inv <= 0) {
+      const hit = o.t === "c" ? Math.abs(o.lane - lanePos) < 0.6
+                              : Math.abs(o.lane + (o.w - 1) / 2 - lanePos) < o.w / 2 + 0.3;
+      if (hit) crash(o);
+    }
+  });
+  objs = objs.filter(o => !o.hit && o.z > dist - 25);
+}
+
+function hud() {
+  $("sc").textContent = score;
+  $("nxt").textContent = expected;
+  $("sp").textContent = Math.round(v * 3.6) + " km/h";
+  $("tleft").textContent = mode === "timed" ? "⏱ " + fmt(Math.max(0, left)) : "∞";
+  $("hint").style.display = dist > 8 ? "none" : "block";
+}
+
+function run() {
+  const g = gen;
+  const f = t => {
+    if (g !== gen) return;
+    const dt = Math.min(0.05, Math.max(0, (t - last) / 1000));
+    last = t;
+    update(dt);
+    draw();
+    hud();
+    raf = requestAnimationFrame(f);
+  };
+  raf = requestAnimationFrame(f);
+}
+
+function halt() {
+  gen++;
+  cancelAnimationFrame(raf);
+  clearTimeout(endT);
+  $("res").classList.remove("show");
+}
+
+function menu() { halt(); st = "home"; document.body.className = "home"; }
+
+function startGame(m) {
+  halt();
+  mode = m;
+  document.body.className = "play";
+  resize();
+  dist = 0; v = 0; time = 0; score = 0; expected = 1; streak = 0;
+  objs = []; inv = 0; shake = 0; flash = 0;
+  target = Math.floor((lanes - 1) / 2); lanePos = target;
+  nextSpawn = 70; left = mins * 60;
+  held.gas = held.brake = false;
+  st = "play";
+  last = performance.now();
+  run();
+}
+
+function end() {
+  st = "done";
+  held.gas = held.brake = false;
+  $("rt2").textContent = "🏁 Time's up!";
+  $("rx").textContent = `Score ${score} · ${expected - 1} numbers in order`;
+  endT = setTimeout(() => { win(); $("res").classList.add("show"); }, 500);
+}
+
+// ===== controls: GAS and BRAKE are held, ◀ ▶ change lane =====
+const steer = d => { if (st === "play") target = Math.max(0, Math.min(lanes - 1, target + d)); };
+
+function hold(id, key) {
+  const b = $(id);
+  b.onpointerdown = e => { e.preventDefault(); held[key] = true; b.classList.add("down"); };
+  b.onpointerup = b.onpointercancel = b.onpointerleave = () => { held[key] = false; b.classList.remove("down"); };
+}
+hold("gas", "gas");
+hold("brk", "brake");
+$("lf").onpointerdown = e => { e.preventDefault(); steer(-1); };
+$("rt").onpointerdown = e => { e.preventDefault(); steer(1); };
+
+// arrow keys also work on a computer
+document.onkeydown = e => {
+  if (e.key === "ArrowLeft") steer(-1);
+  else if (e.key === "ArrowRight") steer(1);
+  else if (e.key === "ArrowUp") held.gas = true;
+  else if (e.key === "ArrowDown") held.brake = true;
+};
+document.onkeyup = e => {
+  if (e.key === "ArrowUp") held.gas = false;
+  if (e.key === "ArrowDown") held.brake = false;
+};
+document.oncontextmenu = e => e.preventDefault();
+</script>
+</body>
+</html>
